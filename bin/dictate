@@ -1,0 +1,85 @@
+#!/bin/sh
+export PATH="$HOME/.local/bin:$PATH"
+dir=${XDG_RUNTIME_DIR:-/tmp}/dictate
+pidf=$dir/pid
+wav=$dir/rec.wav
+remute=$dir/remute
+statef=$dir/state
+model=${DICTATE_MODEL:-$HOME/.local/share/whisper/ggml-small.bin}
+signal=${DICTATE_WAYBAR_SIGNAL:-12}
+mkdir -p "$dir"
+
+notify() {
+  notify-send -a dictate -t "$4" -u low -h string:x-canonical-private-synchronous:dictate "$1 $2" "$3"
+}
+
+set_state() {
+  if [ "$1" = idle ]; then rm -f "$statef"; else echo "$1" >"$statef"; fi
+  pkill -x -RTMIN+"$signal" waybar
+}
+
+recording() {
+  [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null
+}
+
+status() {
+  state=idle
+  if recording; then
+    state=recording
+  elif [ "$(cat "$statef" 2>/dev/null)" = transcribing ]; then
+    state=transcribing
+  fi
+  case "$state" in
+    recording) echo '{"text": "●", "tooltip": "Recording, click to stop", "class": "recording"}' ;;
+    transcribing) echo '{"text": "󰔟", "tooltip": "Transcribing", "class": "transcribing"}' ;;
+    *) echo '{"text": "", "tooltip": "", "class": "idle"}' ;;
+  esac
+}
+
+stop() {
+  pid=$(cat "$pidf")
+  rm -f "$pidf"
+  kill -INT "$pid"
+  while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
+  set_state transcribing
+  if [ -f "$remute" ]; then
+    rm -f "$remute"
+    wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 1
+  fi
+  text=$(whisper-cli -m "$model" -l auto -t 8 -nt -np -sns -f "$wav" 2>/dev/null |
+    tr '\n' ' ' | sed -e 's/\[[A-Z_]*\]//g' -e 's/  */ /g' -e 's/^ //' -e 's/ $//')
+  rm -f "$wav"
+  set_state idle
+  if [ -z "$text" ]; then
+    notify 󰍭 "Nothing heard" "Is the mic muted?" 3000
+    exit 0
+  fi
+  wl-copy -- "$text"
+  notify 󰄬 "Dictated" "$text" 4000
+  exec wtype -- "$text"
+}
+
+start() {
+  rm -f "$wav"
+  if wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | grep -q MUTED; then
+    wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0
+    touch "$remute"
+    sleep 0.1
+  fi
+  setsid sh -c "echo \$\$ > \"\$1\"; exec pw-record --rate 16000 --channels 1 \"\$2\"" sh "$pidf" "$wav" >/dev/null 2>&1 &
+  sleep 0.2
+  set_state recording
+}
+
+case "$1" in
+  status) status ;;
+  *)
+    if recording; then
+      stop
+    elif [ "$(cat "$statef" 2>/dev/null)" = transcribing ]; then
+      exit 0
+    else
+      start
+    fi
+    ;;
+esac

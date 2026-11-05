@@ -1,0 +1,26 @@
+#custom-dictate {
+  border-radius: 4px;
+  border: 2px solid alpha(@error, 0.55);
+  background-color: @surface_container;
+  color: @error;
+  margin: 0px 2px;
+  padding: 0px 12px 0px 8px;
+}
+
+#custom-dictate.recording {
+  animation: dictate-blink 0.6s ease-in-out infinite alternate;
+}
+
+#custom-dictate.transcribing {
+  border-color: alpha(@primary, 0.55);
+  color: @primary;
+}
+
+@keyframes dictate-blink {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.15;
+  }
+}

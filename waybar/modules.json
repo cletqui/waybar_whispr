@@ -1,0 +1,11 @@
+{
+  "custom/dictate": {
+    "exec": "$HOME/.local/bin/dictate status",
+    "on-click": "$HOME/.local/bin/dictate",
+    "return-type": "json",
+    "hide-empty-text": true,
+    "interval": "once",
+    "signal": 12,
+    "tooltip": true
+  }
+}
