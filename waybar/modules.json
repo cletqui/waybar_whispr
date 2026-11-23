@@ -1,5 +1,5 @@
 {
-  "custom/dictate": {
+  "custom/whispr": {
     "exec": "$HOME/.local/bin/dictate status",
     "on-click": "$HOME/.local/bin/dictate",
     "return-type": "json",

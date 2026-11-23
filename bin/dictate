@@ -7,6 +7,7 @@ remute=$dir/remute
 statef=$dir/state
 model=${DICTATE_MODEL:-$HOME/.local/share/whisper/ggml-small.bin}
 signal=${DICTATE_WAYBAR_SIGNAL:-12}
+source=${DICTATE_SOURCE:-@DEFAULT_SOURCE@}
 mkdir -p "$dir"
 
 notify() {
@@ -14,7 +15,7 @@ notify() {
 }
 
 set_state() {
-  if [ "$1" = idle ]; then rm -f "$statef"; else echo "$1" >"$statef"; fi
+  if [ "$1" = idle ]; then rm -f "$statef"; else echo "$1 $$" >"$statef"; fi
   pkill -x -RTMIN+"$signal" waybar
 }
 
@@ -22,11 +23,16 @@ recording() {
   [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null
 }
 
+transcribing() {
+  read -r word tpid 2>/dev/null <"$statef"
+  [ "$word" = transcribing ] && kill -0 "$tpid" 2>/dev/null
+}
+
 status() {
   state=idle
   if recording; then
     state=recording
-  elif [ "$(cat "$statef" 2>/dev/null)" = transcribing ]; then
+  elif transcribing; then
     state=transcribing
   fi
   case "$state" in
@@ -42,9 +48,11 @@ stop() {
   kill -INT "$pid"
   while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
   set_state transcribing
+  trap 'rm -f "$wav"; set_state idle' EXIT
+  trap 'exit 1' INT TERM HUP
   if [ -f "$remute" ]; then
     rm -f "$remute"
-    wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 1
+    pactl set-source-mute "$source" 1
   fi
   text=$(whisper-cli -m "$model" -l auto -t 8 -nt -np -sns -f "$wav" 2>/dev/null |
     tr '\n' ' ' | sed -e 's/\[[A-Z_]*\]//g' -e 's/  */ /g' -e 's/^ //' -e 's/ $//')
@@ -61,12 +69,12 @@ stop() {
 
 start() {
   rm -f "$wav"
-  if wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | grep -q MUTED; then
-    wpctl set-mute @DEFAULT_AUDIO_SOURCE@ 0
+  if pactl get-source-mute "$source" | grep -q yes; then
+    pactl set-source-mute "$source" 0
     touch "$remute"
     sleep 0.1
   fi
-  setsid sh -c "echo \$\$ > \"\$1\"; exec pw-record --rate 16000 --channels 1 \"\$2\"" sh "$pidf" "$wav" >/dev/null 2>&1 &
+  setsid sh -c "echo \$\$ > \"\$1\"; exec pw-record --rate 16000 --channels 1 \${3:+--target \"\$3\"} \"\$2\"" sh "$pidf" "$wav" "${DICTATE_SOURCE:-}" >/dev/null 2>&1 &
   sleep 0.2
   set_state recording
 }
@@ -76,7 +84,7 @@ case "$1" in
   *)
     if recording; then
       stop
-    elif [ "$(cat "$statef" 2>/dev/null)" = transcribing ]; then
+    elif transcribing; then
       exit 0
     else
       start
